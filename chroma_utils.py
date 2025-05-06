@@ -44,7 +44,7 @@ def index_document_to_chroma(filepath: str, file_id: int) -> bool:
 
         # Add metadata to each split
         for document in documents:
-            documents.metadata['file_id'] = file_id
+            document.metadata['file_id'] = file_id
 
         # Index all splits
         vector_store.add_documents(documents)

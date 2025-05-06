@@ -1,16 +1,16 @@
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, UploadFile, File, HTTPException
 import uuid
 import os
 
 from pydantic_models import DeleteFileRequest, QueryInput, QueryResponse
 
-from db_utils import insert_file_to_document_store, delete_file_from_document_store, \
-    add_file_to_chroma_db, delete_file_from_chroma_db, get_all_documents_in_store,\
-    insert_application_logs
+from db_utils import insert_file_to_document_store, delete_file_from_document_store, get_all_documents_in_store
+from chroma_utils import index_document_to_chroma
 
 from langchain_utils import get_chat_history, get_rag_chain
 
 import logging
+import shutil
 
 
 # Initialize Logging
@@ -24,23 +24,35 @@ app = FastAPI()
 
 # Upload document (to both document store and vector db)
 @app.post('/upload-document')
-def upload_and_index_document(file: UploadFile):
+def upload_and_index_document(file: UploadFile=File(...)):
 
     allowed_extensions = ['.pdf', '.docx', '.html']
     file_extension = os.path.splitext(file.filename)[1].lower()
 
-    # Read uploaded file
+    if file_extension not in allowed_extensions:
+        raise HTTPException(status_code=400, 
+                            detail=f"File Type not supported. Allowed types are {','.join(allowed_extensions)}")
 
-    # Add to document store
-    file_id = insert_file_to_document_store(file)
+    try:
+        # Add file to document store - just storing the filename and creating an ID
+        file_id = insert_file_to_document_store(file.filename)
 
-    # Add to vector database
-    success = add_file_to_chroma_db(file)
+        # Store the doc temporarily on server filesystem
+        temp_filepath = 'temp_' + file.filename
+        with open(temp_filepath, 'wb'):
+            shutil.copy(file.file, temp_filepath)
 
-    if success:
-        pass
-    else:
-        delete_file_from_document_store(file_id)
+        # Add to vector database
+        success = index_document_to_chroma(temp_filepath, file_id)
+
+        if success:
+            pass
+        else:
+            delete_file_from_document_store(file_id)
+        
+    finally:
+        if os.path.exists(temp_filepath):
+            os.remove(temp_filepath)
 
     return {}
 
